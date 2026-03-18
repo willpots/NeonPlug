@@ -105,6 +105,7 @@ export function useRadioConnection() {
     setRawRadioSettingsData(null);
 
     let protocol: RadioProtocol | null = null;
+    let operationFailed = false;
     let tabWentHiddenDuringOperation = false;
     const onVisibilityChange = () => {
       if (document.hidden) tabWentHiddenDuringOperation = true;
@@ -333,6 +334,7 @@ export function useRadioConnection() {
       // Step 6: Complete (contacts are read separately on demand)
       onProgress?.(100, 'Read complete!', steps[5]);
     } catch (err) {
+      operationFailed = true;
       console.error('Error during radio read operation:', err);
       const rawMessage = err instanceof Error ? err.message : 'Read failed';
       const errorMessage = withVisibilityContext(rawMessage, tabWentHiddenDuringOperation);
@@ -545,7 +547,7 @@ export function useRadioConnection() {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       // Only set connecting to false if we didn't already (success case)
       // On error, we set it in the catch block so modal stays open to show error
-      if (!error) {
+      if (!operationFailed) {
         setIsConnecting(false);
       }
     }
@@ -763,6 +765,7 @@ export function useRadioConnection() {
     setConnectionError(null);
     
     let protocol: RadioProtocol | null = null;
+    let operationFailed = false;
     const steps = WRITE_CHANNELS_STEPS;
     let tabWentHiddenDuringOperation = false;
     const onVisibilityChange = () => {
@@ -940,6 +943,7 @@ export function useRadioConnection() {
         onProgress?.(100, `Successfully wrote ${summary} to radio!`, steps[4]);
       }
     } catch (err) {
+      operationFailed = true;
       const rawMessage = err instanceof Error ? err.message : 'Write failed';
       const errorMessage = withVisibilityContext(rawMessage, tabWentHiddenDuringOperation);
       setError(errorMessage);
@@ -967,7 +971,7 @@ export function useRadioConnection() {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       // Only set connecting to false if we didn't already (success case)
       // On error, we set it in the catch block so modal stays open to show error
-      if (!error) {
+      if (!operationFailed) {
         setIsConnecting(false);
       }
     }
