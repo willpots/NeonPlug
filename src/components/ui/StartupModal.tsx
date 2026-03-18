@@ -67,6 +67,15 @@ export const StartupModal: React.FC<StartupModalProps> = ({
   }, [isOpen]);
   const options = useMemo(() => getRadioPickerOptions(), []);
 
+  // Persist the default selection so readFromRadio always has a non-null selectedRadioModel.
+  // The UI shows options[0] as visually selected when selectedRadioModel is null, but
+  // that default is never written to the store unless the user explicitly clicks it.
+  useEffect(() => {
+    if (isOpen && !selectedRadioModel && options.length > 0) {
+      setSelectedRadioModel(options[0].modelId);
+    }
+  }, [isOpen, selectedRadioModel, options, setSelectedRadioModel]);
+
   // Default to first radio if none selected
   const effectiveSelected = selectedRadioModel ?? options[0]?.modelId ?? null;
   const selectedOption = options.find(o => o.modelId === effectiveSelected);

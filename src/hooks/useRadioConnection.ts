@@ -147,7 +147,9 @@ export function useRadioConnection() {
       setConnected(true);
       
       // Step 4: Bulk read when capability says so (e.g. DM-32UV); otherwise protocol reads on demand
-      if (caps?.supportsBulkRead && typeof (protocol as any).bulkReadRequiredBlocks === 'function') {
+      // Use the connected radio's actual model for capabilities in case selectedRadioModel was null/unrecognized
+      const effectiveCaps = getCapabilitiesForModel(radioInfo?.model) ?? caps;
+      if (effectiveCaps?.supportsBulkRead && typeof (protocol as any).bulkReadRequiredBlocks === 'function') {
         onProgress?.(15, 'Reading all memory blocks...', steps[3]);
         await (protocol as any).bulkReadRequiredBlocks();
       }
@@ -331,6 +333,7 @@ export function useRadioConnection() {
       // Step 6: Complete (contacts are read separately on demand)
       onProgress?.(100, 'Read complete!', steps[5]);
     } catch (err) {
+      console.error('Error during radio read operation:', err);
       const rawMessage = err instanceof Error ? err.message : 'Read failed';
       const errorMessage = withVisibilityContext(rawMessage, tabWentHiddenDuringOperation);
       const isPortSelectionCancelled = rawMessage.includes('cancelled') || rawMessage.includes('Port selection cancelled');
@@ -368,7 +371,7 @@ export function useRadioConnection() {
           setRadioInfo(radioInfo);
           setConnected(true);
           
-          const retryCaps = getCapabilitiesForModel(selectedRadioModel ?? null);
+          const retryCaps = getCapabilitiesForModel(radioInfo?.model) ?? getCapabilitiesForModel(selectedRadioModel ?? null);
           if (retryCaps?.supportsBulkRead && typeof (protocol as any).bulkReadRequiredBlocks === 'function') {
             onProgress?.(15, 'Reading all memory blocks...', steps[3]);
             await (protocol as any).bulkReadRequiredBlocks();
@@ -497,15 +500,14 @@ export function useRadioConnection() {
           onProgress?.(100, 'Read complete!', steps[5]);
           return; // Success - exit without throwing
         } catch (retryErr) {
-          // Retry also failed, fall through to show error
+          // Retry also failed — show the original error, which is more informative than the
+          // secondary "No reply from the radio" that the retry produces due to port state.
           console.error('Retry with port selection also failed:', retryErr);
-          const retryRawMessage = retryErr instanceof Error ? retryErr.message : 'Read failed';
-          const retryErrorMessage = withVisibilityContext(retryRawMessage, tabWentHiddenDuringOperation);
-          setError(retryErrorMessage);
-          setConnectionError(retryErrorMessage);
-          onProgress?.(0, `Error: ${retryErrorMessage}`, 'Error');
+          setError(errorMessage);
+          setConnectionError(errorMessage);
+          onProgress?.(0, `Error: ${errorMessage}`, 'Error');
           setIsConnecting(false);
-          
+
           if (protocol) {
             try {
               await protocol.disconnect();
@@ -513,7 +515,7 @@ export function useRadioConnection() {
               console.warn('Error during disconnect cleanup:', disconnectErr);
             }
           }
-          throw retryErr;
+          throw err;
         }
       }
       
