@@ -3400,17 +3400,43 @@ export class DM32UVProtocol implements RadioProtocol {
     }
 
     // Generate zone blocks - ALWAYS write zones when writing channels
-    const zoneBlocks = this.discoveredBlocks.filter(b => b.metadata === METADATA.ZONE);
+    const maxZonesFirstBlock = Math.floor((BLOCK_SIZE.STANDARD - OFFSET.ZONE_START) / BLOCK_SIZE.ZONE); // 28
+    const maxZonesPerBlock = Math.floor(BLOCK_SIZE.STANDARD / BLOCK_SIZE.ZONE); // 28
+
+    let zoneBlocks = this.discoveredBlocks
+      .filter(b => b.metadata === METADATA.ZONE)
+      .sort((a, b) => a.address - b.address);
     if (zoneBlocks.length === 0) {
       throw new Error('No zone blocks found');
     }
 
-    // Read existing zone blocks from cache ONLY (no radio communication)
+    // If we need more zones than current zone blocks hold, allocate adjacent empty blocks.
+    // The radio advertises 250 zones, so empty blocks adjacent to zone blocks are zone-capable.
+    const currentCapacity = maxZonesFirstBlock + Math.max(0, zoneBlocks.length - 1) * maxZonesPerBlock;
+    if (zones.length > currentCapacity) {
+      const lastZoneAddr = zoneBlocks[zoneBlocks.length - 1].address;
+      const additionalNeeded = Math.ceil((zones.length - currentCapacity) / maxZonesPerBlock);
+      log.info(`Need ${additionalNeeded} more zone block(s): ${zones.length} zones, current capacity ${currentCapacity} in ${zoneBlocks.length} block(s)`, 'Protocol');
+
+      for (let i = 0; i < additionalNeeded; i++) {
+        const nextAddr = lastZoneAddr + (i + 1) * BLOCK_SIZE.STANDARD;
+        const candidate = this.discoveredBlocks.find(b => b.address === nextAddr);
+        if (candidate && (candidate.type === 'empty' || candidate.metadata === 0xFF || candidate.metadata === 0x00)) {
+          log.info(`Allocating empty block at 0x${nextAddr.toString(16).toUpperCase()} as zone block ${zoneBlocks.length + 1}`, 'Protocol');
+          zoneBlocks = [...zoneBlocks, { address: nextAddr, metadata: METADATA.ZONE, type: 'zone' as const }];
+        } else {
+          log.warn(`Cannot allocate zone block at 0x${nextAddr.toString(16).toUpperCase()}: ${candidate ? `occupied (${candidate.type}, metadata 0x${candidate.metadata.toString(16)})` : 'not in discovered blocks'}`, 'Protocol');
+          break;
+        }
+      }
+    }
+
+    // Read existing zone blocks from cache for comparison (newly allocated blocks won't be cached)
     let originalZoneData: Uint8Array | null = null;
-    const cachedZoneBlocks = zoneBlocks.map(block => 
+    const cachedZoneBlocks = zoneBlocks.map(block =>
       this.cachedBlockData.find(cached => cached.address === block.address)
     );
-    
+
     if (cachedZoneBlocks.every(cached => cached !== undefined)) {
       // Use cached data - concatenate all zone blocks
       const zoneBlockDataArrays = cachedZoneBlocks.map(cached => cached!.data);
@@ -3423,36 +3449,41 @@ export class DM32UVProtocol implements RadioProtocol {
       }
       log.debug(`Using cached zone data, total size: ${originalZoneData.length} bytes`, 'Protocol');
     } else {
-      log.warn('Zone blocks not in cache - skipping comparison', 'Protocol');
+      log.warn('Zone blocks not all in cache (may include newly allocated blocks) - skipping comparison', 'Protocol');
     }
 
     // Calculate total size needed for all zone blocks
     const totalZoneBlocksSize = zoneBlocks.length * BLOCK_SIZE.STANDARD;
-    
+
     // Generate fresh zone data from scratch (filled with 0xFF)
     const allZoneData = new Uint8Array(totalZoneBlocksSize);
     allZoneData.fill(0xFF);
 
     // Encode all zones and write them to the fresh data
-    const zonesToWrite = zones.length > 0 ? zones : [];
+    const finalCapacity = maxZonesFirstBlock + Math.max(0, zoneBlocks.length - 1) * maxZonesPerBlock;
+    const zonesToWrite = zones.length > 0 ? zones.slice(0, finalCapacity) : [];
+    if (zones.length > finalCapacity) {
+      log.warn(`Could only allocate ${zoneBlocks.length} zone block(s); capping ${zones.length} zones to ${finalCapacity}`, 'Protocol');
+    }
     log.info(`Writing ${zonesToWrite.length} zones to ${zoneBlocks.length} block(s)`, 'Protocol');
-    
+
     if (zonesToWrite.length === 0) {
       log.warn('No zones provided - writing empty zone blocks', 'Protocol');
     } else {
       const encodedZones = zonesToWrite.map((zone, idx) => encodeZone(zone, idx + 1));
       log.debug(`Encoded ${encodedZones.length} zones`, 'Protocol');
-      
+
       // Write all zones to the fresh data
       // Zones are 145 bytes each, starting at offset 16
       // Zone N is at: 16 + (N - 1) * 145
       for (let i = 0; i < encodedZones.length; i++) {
         const zoneOffset = OFFSET.ZONE_START + (i * BLOCK_SIZE.ZONE);
         if (zoneOffset + BLOCK_SIZE.ZONE > allZoneData.length) {
-          log.error(`Zone ${i + 1} would exceed block size: offset ${zoneOffset}, data length ${allZoneData.length}`, 'Protocol');
-          throw new Error(`Zone ${i + 1} would exceed block size`);
+          // Should not happen after capping, but guard against it
+          log.warn(`Zone ${i + 1} would exceed allZoneData bounds (offset ${zoneOffset}, length ${allZoneData.length}). Stopping zone encoding.`, 'Protocol');
+          break;
         }
-        
+
         allZoneData.set(encodedZones[i], zoneOffset);
       }
       
@@ -3478,8 +3509,6 @@ export class DM32UVProtocol implements RadioProtocol {
       // First block: zones start at byte 16, max (4096-16)/145 = 28 zones
       // Subsequent blocks: zones start at byte 0, max 4096/145 = 28 zones
       const isFirstBlock = blockIdx === 0;
-      const maxZonesFirstBlock = Math.floor((BLOCK_SIZE.STANDARD - OFFSET.ZONE_START) / BLOCK_SIZE.ZONE); // 28
-      const maxZonesPerBlock = Math.floor(BLOCK_SIZE.STANDARD / BLOCK_SIZE.ZONE); // 28
       
       let firstZoneIdx: number;
       let zonesInBlock: number;
@@ -3566,7 +3595,7 @@ export class DM32UVProtocol implements RadioProtocol {
         newMetadata: 0,
       };
       
-      if (originalBlockData) {
+      if (originalBlockData && originalBlockData.length === BLOCK_SIZE.STANDARD) {
         log.verbose(`===== Zone Block ${blockIdx} Comparison (Address: ${blockComparison.address}) =====`, 'Protocol');
         
         // Compare byte by byte for the ENTIRE block (4096 bytes)
@@ -3682,9 +3711,11 @@ export class DM32UVProtocol implements RadioProtocol {
         }
       }
       const totalScanListBlocksNeeded = Math.ceil(totalScanListSize / BLOCK_SIZE.STANDARD);
-      
-      // Generate concatenated scan list data
-      const allScanListData = new Uint8Array(totalScanListBlocksNeeded * BLOCK_SIZE.STANDARD);
+
+      // Ensure the buffer covers ALL existing scan blocks, even when there are no scan lists to write
+      // (a zero-length buffer would produce 0-length slices and cause undefined access on data[0xFFF])
+      const allScanListDataSize = Math.max(scanBlocks.length, totalScanListBlocksNeeded) * BLOCK_SIZE.STANDARD;
+      const allScanListData = new Uint8Array(allScanListDataSize);
       allScanListData.fill(0xFF);
       
       // Write scan lists to fixed 57-byte boundaries: (57 * N) - 56
