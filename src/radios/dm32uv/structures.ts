@@ -775,7 +775,16 @@ export function encodeChannel(channel: Channel): Uint8Array {
 export function parseZones(
   data: Uint8Array,
   onRawZoneParsed?: (zoneNum: number, rawData: Uint8Array, name: string) => void
-): Zone[] {
+): { zones: Zone[]; defaultZoneA: number; defaultZoneB: number } {
+  // Zone block header (first 16 bytes):
+  //   0x00: zone count
+  //   0x01: display B current channel-in-zone (1-based, updated by radio during use)
+  //   0x03: display A current channel-in-zone (1-based, updated by radio during use)
+  //   0x05: display A default zone (1-based) [confirmed]
+  //   0x07: display B default zone (1-based, 0xFF = not set = zone 1) [confirmed]
+  const defaultZoneB = data.length > 7 ? (data[0x07] === 0xFF ? 1 : data[0x07]) : 0;
+  const defaultZoneA = data.length > 5 ? data[0x05] : 0;
+
   const zones: Zone[] = [];
 
   // Zones are 145 bytes each, starting at offset 16
@@ -902,12 +911,12 @@ export function parseZones(
 
     const zone = { id: generateZoneId(), name, channels };
     zones.push(zone);
-    
+
     // Call callback to store raw data - store full 145 bytes for complete debug info
     onRawZoneParsed?.(zoneNum, zoneData, name);
   }
 
-  return zones;
+  return { zones, defaultZoneA, defaultZoneB };
 }
 
 /**
@@ -1574,6 +1583,7 @@ export function parseRadioSettings(data: Uint8Array): RadioSettings {
   const unknownValue = Array.from(unknownValueBytes)
     .map(b => b.toString(16).padStart(2, '0'))
     .join(' ');
+
 
   // VFO Channel Information
   // Note: VFO A and VFO B are now parsed from block 0x41 as channels 4001 and 4002

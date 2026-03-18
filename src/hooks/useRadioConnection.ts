@@ -53,7 +53,7 @@ export function useRadioConnection() {
   
   const { selectedRadioModel, preferredTransport, radioInfo, setConnected, setRadioInfo, setSettings, setRawRadioSettingsData, setRawContactBlockData, setRawContactBlocks, setBlockMetadata, setBlockData, setWriteBlockData, setZoneComparisonData, setBootImageRaw, setBootImageDescription, setConnectionError } = useRadioStore();
   const { setChannels, setRawChannelData } = useChannelsStore();
-  const { setZones, setRawZoneData } = useZonesStore();
+  const { setZones, setRawZoneData, setDefaultZoneA, setDefaultZoneB } = useZonesStore();
   const { setScanLists, setRawScanListData } = useScanListsStore();
   const { setContacts, setContactsLoaded } = useContactsStore();
   const { setSettings: setRadioSettings } = useRadioSettingsStore();
@@ -204,6 +204,10 @@ export function useRadioConnection() {
       // Store raw zone data for debug export
       if ((protocol as any).rawZoneData) {
         setRawZoneData((protocol as any).rawZoneData);
+      }
+      if ((protocol as any).defaultZoneA !== undefined) {
+        setDefaultZoneA((protocol as any).defaultZoneA);
+        setDefaultZoneB((protocol as any).defaultZoneB);
       }
 
       // Read scan lists
@@ -405,7 +409,11 @@ export function useRadioConnection() {
           if ((protocol as any).rawZoneData) {
             setRawZoneData((protocol as any).rawZoneData);
           }
-          
+          if ((protocol as any).defaultZoneA !== undefined) {
+            setDefaultZoneA((protocol as any).defaultZoneA);
+            setDefaultZoneB((protocol as any).defaultZoneB);
+          }
+
           const scanLists = await protocol.readScanLists();
           setScanLists(scanLists);
           if ((protocol as any).rawScanListData) {
@@ -843,6 +851,10 @@ export function useRadioConnection() {
       
       // Step 4: Write channels (and zones/scan lists for DM-32; UV5R-Mini uses writeChannels only)
       if (typeof (protocol as any).writeAllData === 'function') {
+        // Pass default zone selections to protocol before writing
+        const { defaultZoneA, defaultZoneB } = useZonesStore.getState();
+        (protocol as any).defaultZoneA = defaultZoneA;
+        (protocol as any).defaultZoneB = defaultZoneB;
         onProgress?.(20, 'Writing channels, zones, and scan lists to radio...', steps[4]);
         await (protocol as any).writeAllData(validChannels, filteredZones, filteredScanLists);
       } else if (typeof protocol.writeChannels === 'function') {

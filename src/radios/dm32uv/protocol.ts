@@ -53,6 +53,8 @@ export class DM32UVProtocol implements RadioProtocol {
   public onProgress?: (progress: number, message: string) => void;
   public rawChannelData: Map<number, { data: Uint8Array; blockAddr: number; offset: number }> = new Map();
   public rawZoneData: Map<string, { data: Uint8Array; zoneNum: number; offset: number }> = new Map();
+  public defaultZoneA: number = 0;
+  public defaultZoneB: number = 0;
   public rawContactBlockData: Uint8Array | null = null;
   public rawContactBlockAddress: number | null = null;
   public rawContactBlocks: Map<number, Uint8Array> = new Map(); // All contact blocks by address
@@ -1580,7 +1582,7 @@ export class DM32UVProtocol implements RadioProtocol {
     const allZoneData = this.concatenateCachedBlocks(zoneBlocks);
 
     this.onProgress?.(50, 'Parsing zone data...');
-    const zones = parseZones(allZoneData, (zoneNum, rawData, name) => {
+    const { zones, defaultZoneA, defaultZoneB } = parseZones(allZoneData, (zoneNum, rawData, name) => {
       // Store raw zone data for debug export
       storeRawData(
         this.rawZoneData,
@@ -1591,7 +1593,9 @@ export class DM32UVProtocol implements RadioProtocol {
       );
     });
 
-    log.info(`Successfully parsed ${zones.length} zones`, 'Protocol');
+    this.defaultZoneA = defaultZoneA;
+    this.defaultZoneB = defaultZoneB;
+    log.info(`Successfully parsed ${zones.length} zones (defaultZoneA=${defaultZoneA}, defaultZoneB=${defaultZoneB})`, 'Protocol');
     this.onProgress?.(100, `Successfully read ${zones.length} zones`);
     return zones;
   }
@@ -1644,9 +1648,15 @@ export class DM32UVProtocol implements RadioProtocol {
       this.onProgress
     );
 
+    // Update zone block header
+    // 0x00: zone count, 0x05: display A zone (1-based), 0x07: display B zone (1-based)
+    allZoneData[0x00] = zones.length;
+    allZoneData[0x05] = this.defaultZoneA;
+    allZoneData[0x07] = this.defaultZoneB;
+
     // Encode zones
     const encodedZones = zones.map((zone, idx) => encodeZone(zone, idx + 1));
-    
+
     // Write zones to the concatenated data
     // Zones are 145 bytes each, starting at offset 16
     for (let i = 0; i < encodedZones.length; i++) {
@@ -2905,7 +2915,7 @@ export class DM32UVProtocol implements RadioProtocol {
       }
 
       const radioSettings = parseRadioSettings(cachedBlock.data);
-      
+
       // Override VFO A and VFO B with data from block 0x41
       if (vfoA) {
         radioSettings.vfoA = vfoA;
@@ -3459,6 +3469,12 @@ export class DM32UVProtocol implements RadioProtocol {
     const allZoneData = new Uint8Array(totalZoneBlocksSize);
     allZoneData.fill(0xFF);
 
+    // Write zone block header (first 16 bytes of first block, before zone definitions at offset 16)
+    // 0x00: zone count, 0x05: display A default zone (1-based), 0x07: display B default zone (1-based)
+    allZoneData[0x00] = zones.length;
+    allZoneData[0x05] = this.defaultZoneA;
+    allZoneData[0x07] = this.defaultZoneB;
+
     // Encode all zones and write them to the fresh data
     const finalCapacity = maxZonesFirstBlock + Math.max(0, zoneBlocks.length - 1) * maxZonesPerBlock;
     const zonesToWrite = zones.length > 0 ? zones.slice(0, finalCapacity) : [];
@@ -3541,14 +3557,14 @@ export class DM32UVProtocol implements RadioProtocol {
         // Only set zone count at byte 0 for the first block
         if (isFirstBlock) {
           const zoneCount = Math.min(Math.max(zonesInBlock, 1), 28); // Clamp to 1-28
-          blockData[0] = zoneCount;
-          log.debug(`Set zone count in byte 0: ${zoneCount} zones for first block`, 'Protocol');
-          
-          // Preserve the original bytes 1-15 if available (to match original structure)
+          // Preserve unknown header bytes from original data; only overwrite known fields
           if (originalBlockData) {
-            blockData.set(originalBlockData.slice(1, 16), 1);
-            log.verbose(`Preserved original bytes 1-15 for first block: ${Array.from(originalBlockData.slice(1, 16)).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ')}`, 'Protocol');
+            blockData.set(originalBlockData.slice(0, 16), 0);
           }
+          blockData[0x00] = zoneCount;
+          blockData[0x05] = this.defaultZoneA;
+          blockData[0x07] = this.defaultZoneB;
+          log.info(`[writeAllData] Zone block header: count=${zoneCount} displayA=${this.defaultZoneA} (byte[0x05]) displayB=${this.defaultZoneB} (byte[0x07])`, 'Protocol');
         } else {
           log.debug(`Block ${blockIdx} is not first block, zones start at byte 0 (no header)`, 'Protocol');
         }

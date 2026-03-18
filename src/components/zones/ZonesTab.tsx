@@ -5,7 +5,7 @@ import { useLogStore } from '../../store/logStore';
 import { ZonesList } from './ZonesList';
 
 export const ZonesTab: React.FC = () => {
-  const { zones, updateZone } = useZonesStore();
+  const { zones, updateZone, defaultZoneA, defaultZoneB, setDefaultZoneA, setDefaultZoneB } = useZonesStore();
   const { channels } = useChannelsStore();
   const addLog = useLogStore((s) => s.addLog);
 
@@ -35,6 +35,37 @@ export const ZonesTab: React.FC = () => {
           {zones.length} zone{zones.length !== 1 ? 's' : ''}
         </div>
       </div>
+
+      <div className="mb-4 flex gap-6 flex-shrink-0">
+        <label className="flex items-center gap-2 text-sm text-cool-gray">
+          Display A Default
+          <select
+            value={defaultZoneA}
+            onChange={(e) => setDefaultZoneA(Number(e.target.value))}
+            className="bg-deep-gray border border-mid-gray text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-neon-cyan"
+          >
+            <option value={0}>— None —</option>
+            {zones.map((z, i) => (
+              <option key={z.id} value={i + 1}>{z.name}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex items-center gap-2 text-sm text-cool-gray">
+          Display B Default
+          <select
+            value={defaultZoneB}
+            onChange={(e) => setDefaultZoneB(Number(e.target.value))}
+            className="bg-deep-gray border border-mid-gray text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-neon-cyan"
+          >
+            <option value={0}>— None —</option>
+            {zones.map((z, i) => (
+              <option key={z.id} value={i + 1}>{z.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <div className="flex-1 min-h-0">
         <ZonesList />
       </div>

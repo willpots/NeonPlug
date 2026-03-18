@@ -11,8 +11,12 @@ interface ZonesState {
   zones: Zone[];
   selectedZoneId: string | null;
   rawZoneData: Map<string, RawZoneData>; // Store raw data for debug export
+  defaultZoneA: number; // 1-based zone index for display A (0 = not set)
+  defaultZoneB: number; // 1-based zone index for display B (0 = not set)
   setZones: (zones: Zone[]) => void;
   setRawZoneData: (rawData: Map<string, RawZoneData>) => void;
+  setDefaultZoneA: (index: number) => void;
+  setDefaultZoneB: (index: number) => void;
   addZone: (zone: Omit<Zone, 'id'>) => void;
   updateZone: (id: string, zone: Partial<Omit<Zone, 'id'>>) => void;
   renameZone: (id: string, newName: string) => boolean;
@@ -28,6 +32,10 @@ export const useZonesStore = create<ZonesState>((set, get) => ({
   selectedZoneId: null,
   selectedZone: null, // Legacy compatibility
   rawZoneData: new Map(),
+  defaultZoneA: 0,
+  defaultZoneB: 0,
+  setDefaultZoneA: (index) => set({ defaultZoneA: index }),
+  setDefaultZoneB: (index) => set({ defaultZoneB: index }),
   setZones: (zones) => {
     // Ensure all zones have IDs - generate if missing
     const zonesWithIds = zones.map((z, index) => ({

@@ -38,8 +38,15 @@ export async function discoverMemoryBlocks(
   for (let addr = startAddr; addr <= alignedEndAddr; addr += 0x1000) {
     // Read metadata byte at offset 0xFFF (last byte of 4KB block)
     const metadataAddr = addr + 0xFFF;
-    const metadataData = await connection.readMemory(metadataAddr, 1);
-    const metadata = metadataData[0];
+    let metadata: number;
+    try {
+      const metadataData = await connection.readMemory(metadataAddr, 1);
+      metadata = metadataData[0];
+    } catch (err) {
+      // Radio didn't respond to this address — treat as unavailable and stop scanning
+      log.warn(`Block at 0x${addr.toString(16).padStart(6, '0').toUpperCase()} unreadable (${err instanceof Error ? err.message : err}); stopping discovery at block ${blockIndex}`, 'Memory');
+      break;
+    }
 
     let type: MemoryBlock['type'] = 'unknown';
     if (metadata === 0x00) {
