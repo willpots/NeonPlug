@@ -130,7 +130,7 @@ export function importChannelsFromChirpCSV(
 
         // Parse tone settings
         const parseTone = (toneMode: string, toneFreq: number, dcsCode: number, dcsPolarity: 'N' | 'P' | ''): CTCSSDCS => {
-          if (toneMode === 'DTCS' || toneMode === 'DTCS-R' || dcsCode > 0) {
+          if (toneMode === 'DTCS' || toneMode === 'DTCS-R') {
             // Use DCS code if available
             const code = dcsCode > 0 ? dcsCode : (toneFreq > 0 ? Math.round(toneFreq) : 0);
             if (code > 0) {
@@ -143,8 +143,8 @@ export function importChannelsFromChirpCSV(
               };
             }
           }
-          
-          if (toneMode === 'Tone' || toneMode === 'TSQL' || toneMode === 'Cross' || toneFreq > 0) {
+
+          if (toneMode === 'Tone' || toneMode === 'TSQL' || toneMode === 'Cross') {
             // Use CTCSS frequency
             const freq = toneFreq > 0 ? toneFreq : 0;
             if (freq > 0) {
