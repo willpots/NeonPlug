@@ -115,6 +115,15 @@ export class DM32Connection {
       throw new Error(`Unsupported radio model: "${modelString}". Expected DP570UV or DM-32UV. Response: ${psearchHex}`);
     }
 
+    // Drain any extra bytes already buffered after the PSEARCH response.
+    // On port-reopen (write-after-read) the radio appends a trailing byte (0x90) in the
+    // same USB chunk as the 8-byte response; it sits in readBuffer until we explicitly
+    // discard it.  Clearing synchronously preserves the handshake timing window.
+    if (this.readBuffer.length > 0) {
+      log.debug(`Draining ${this.readBuffer.length} post-PSEARCH byte(s): ${this.formatBytesHex(this.readBuffer)}`, 'Connection');
+      this.readBuffer = new Uint8Array(0);
+    }
+
     await this.delay(50);
 
     // Step 2: PASSSTA
