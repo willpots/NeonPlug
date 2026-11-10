@@ -837,6 +837,10 @@ export const SettingsTab: React.FC = () => {
                                 {ANALOG_CALL_TYPE_OPTIONS.map(option => (
                                   <option key={option.value} value={option.value}>{option.label}</option>
                                 ))}
+                                {/* A type the radio holds that NeonPlug has no name for is shown, not snapped to the first option. */}
+                                {!ANALOG_CALL_TYPE_OPTIONS.some(option => option.value === (entry.callType ?? 0)) && (
+                                  <option value={entry.callType}>Unknown ({entry.callType})</option>
+                                )}
                               </select>
                             </td>
                             <td className="py-2 px-3">

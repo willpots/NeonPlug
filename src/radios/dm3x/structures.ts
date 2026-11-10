@@ -181,6 +181,32 @@ export function writeChannelFlagBit(
 }
 
 /**
+ * A name as the radio stores it: one byte per character, ending at the first
+ * 0x00 or at 0xFF padding (an unnamed VFO is sixteen 0xFF). Decoded byte for
+ * byte, so encodeRadioName gives the same bytes back.
+ */
+export function decodeRadioName(bytes: Uint8Array): string {
+  let end = bytes.findIndex((b) => b === 0x00 || b === 0xff);
+  if (end < 0) end = bytes.length;
+  return String.fromCharCode(...bytes.subarray(0, end)).trim();
+}
+
+/**
+ * The bytes for a name field: one byte per character, printable 0x20-0xFE
+ * only (no DEL, and no 0xFF, which marks padding), at most `max` of them —
+ * the same rule talk group names follow. Names used to go out as UTF-8: a
+ * character past 0x7F took two or three bytes, so a 16-character name could
+ * run past its field into the frequencies, and an unnamed VFO read as "ÿ"
+ * came back as C3 BF pairs.
+ */
+export function encodeRadioName(name: string, max: number): Uint8Array {
+  const codes = Array.from(name, (c) => c.codePointAt(0) ?? 0).filter(
+    (code) => code >= 0x20 && code <= 0xfe && code !== 0x7f
+  );
+  return Uint8Array.from(codes.slice(0, max));
+}
+
+/**
  * Parse a single channel from 48-byte data
  * @param data - 48-byte channel data
  * @param channelNumber - Channel number (1-indexed)
@@ -190,13 +216,8 @@ export function parseChannel(data: Uint8Array, channelNumber: number): Channel {
     throw new Error('Channel data must be 48 bytes');
   }
 
-  // Name (0x00-0x0F, 16 bytes, null-terminated)
-  const nameBytes = data.slice(0, 16);
-  const nullIndex = nameBytes.indexOf(0);
-  const name = new TextDecoder('ascii', { fatal: false })
-    .decode(nameBytes.slice(0, nullIndex >= 0 ? nullIndex : 16))
-    .replace(/\x00/g, '')
-    .trim();
+  // Name (0x00-0x0F, 16 bytes): ends at 0x00 or at 0xFF padding
+  const name = decodeRadioName(data.subarray(0, 16));
 
   // RX Frequency (0x10-0x13, 4 bytes BCD)
   let rxFreq: number;
@@ -494,7 +515,9 @@ export function parseChannel(data: Uint8Array, channelNumber: number): Channel {
 
   return {
     number: channelNumber,
-    name: name || `Channel ${channelNumber}`,
+    // An unnamed channel is shown as "Channel N". The VFOs (4001, 4002) are not
+    // numbered channels: they keep an empty name, or every write would name them.
+    name: name || (channelNumber > LIMITS.CHANNEL_MAX ? '' : `Channel ${channelNumber}`),
     rxFrequency: rxFreq,
     txFrequency: txFreq,
     mode,
@@ -566,7 +589,7 @@ export function encodeChannel(channel: Channel): Uint8Array {
   data.fill(0xFF);
   
   // Name (0x00-0x0F, 16 bytes, null-terminated)
-  const nameBytes = new TextEncoder().encode(channel.name.slice(0, 16));
+  const nameBytes = encodeRadioName(channel.name, 16);
   data.set(nameBytes, 0);
   if (nameBytes.length < 16) {
     data[nameBytes.length] = 0; // Null terminator
@@ -2043,7 +2066,9 @@ export function encodeRadioSettings(settings: RadioSettings, originalData?: Uint
       const offset = 0x120 + i * 2;
       const entry = settings.analogCall[i];
       if (entry) {
-        data[offset] = Math.max(0, Math.min(2, entry.callType)) & 0xFF;
+        // Written as read. NeonPlug knows types 0-2, but radios hold 3 as
+        // well, and clamping turned that 3 into a 2 on every write.
+        data[offset] = entry.callType & 0xFF;
         data[offset + 1] = (entry.callId & 0xFF);
       }
     }
