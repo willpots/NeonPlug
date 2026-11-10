@@ -111,6 +111,20 @@ export class DM3xConnection {
     const psearchHex = this.formatBytesHex(psearchResponse);
     log.info(`PSEARCH: ${psearchHex}`, 'Connection');
 
+    // Drop anything that came in the same chunk as the 8-byte PSEARCH reply.
+    // On a reopened port (a Write straight after a Read) the radio has been seen
+    // to append 0x90, which would otherwise be read as the first byte of the
+    // PASSSTA reply. PASSSTA has not been sent yet, so nothing here belongs to it.
+    // This is synchronous on purpose: clearBuffer() waits CLEAR_BUFFER_DELAY,
+    // which is long enough for the radio to give up on the handshake.
+    if (this.readBuffer.length > 0) {
+      log.debug(
+        `Dropping ${this.readBuffer.length} byte(s) after the PSEARCH reply: ${this.formatBytesHex(this.readBuffer)}`,
+        'Connection'
+      );
+      this.readBuffer = new Uint8Array(0);
+    }
+
     if (psearchResponse[0] !== 0x06) {
       throw new Error(`Radio not found: Expected ACK (0x06), got 0x${psearchResponse[0].toString(16).padStart(2, '0')}. Response: ${psearchHex}`);
     }
