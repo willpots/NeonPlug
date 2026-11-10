@@ -67,6 +67,14 @@ export interface DM3xVariant {
 
 const isDm36Firmware = (firmware: string) => firmware.startsWith('DM36.');
 
+/**
+ * Channels one 4 KB channel block holds: 48-byte records up to the metadata
+ * byte at 0xFFF, after the 16-byte header in the first block (0x12).
+ */
+export function channelsPerBlock(isFirstBlock: boolean): number {
+  return isFirstBlock ? 84 : 85;
+}
+
 /** The DM-32UV, also sold as the DP570UV. Its model ID predates the picker. */
 export const DM32_VARIANT: DM3xVariant = {
   model: 'DP570UV',
@@ -1455,9 +1463,15 @@ export class DM3xRadio extends BaseDigitalProtocol implements DM3xProtocol {
    * Encodes channels to binary format and generates the appropriate memory blocks.
    * Updates the channel count in the first block header.
    * 
+   * Only the channel blocks the radio already has are filled; NeonPlug does not
+   * allocate new ones. A codeplug with more channels than those blocks hold is
+   * refused here, before any block is written. It used to be cut off at the
+   * last block while the header still claimed the full count, so the radio was
+   * told about channels that were never written.
+   *
    * @param channels Array of channels to write
    * @returns Array of blocks to write (address, data, metadata)
-   * @throws {Error} If channel count exceeds maximum (4000)
+   * @throws {Error} If channel count exceeds maximum (4000) or what the radio's channel blocks hold
    */
   private generateChannelBlocks(channels: Channel[]): Array<{ address: number; data: Uint8Array; metadata: number }> {
     if (channels.length === 0) {
@@ -1480,6 +1494,18 @@ export class DM3xRadio extends BaseDigitalProtocol implements DM3xProtocol {
     const firstChannelBlock = channelBlocks.find(b => b.metadata === METADATA.CHANNEL_FIRST);
     if (!firstChannelBlock) {
       throw new Error(`First channel block (metadata 0x${METADATA.CHANNEL_FIRST.toString(16)}) not found`);
+    }
+
+    const capacity = channelBlocks.reduce(
+      (sum, b) => sum + channelsPerBlock(b.metadata === METADATA.CHANNEL_FIRST),
+      0
+    );
+    if (channels.length > capacity) {
+      throw new Error(
+        `This codeplug has ${channels.length} channels, but the radio's ${channelBlocks.length} channel ` +
+          `blocks hold ${capacity}. NeonPlug can't add channel blocks yet, so nothing was written. ` +
+          `Remove ${channels.length - capacity} channel(s) and write again.`
+      );
     }
 
     // Encode all channels to binary
@@ -1508,7 +1534,7 @@ export class DM3xRadio extends BaseDigitalProtocol implements DM3xProtocol {
       
       // Determine start offset and max channels for this block
       const startOffset = isFirstBlock ? OFFSET.FIRST_CHANNEL : 0x00;
-      const maxChannelsInBlock = isFirstBlock ? 84 : 85;
+      const maxChannelsInBlock = channelsPerBlock(isFirstBlock);
       const maxOffset = startOffset + (maxChannelsInBlock * BLOCK_SIZE.CHANNEL);
       
       // Write channels to this block
